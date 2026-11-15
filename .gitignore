@@ -1,0 +1,49 @@
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.*.example
+
+# Dependencies
+**/node_modules/
+**/vendor/
+
+# Frontend build
+frontend/dist/
+dist/
+
+# Laravel generated files
+backend/storage/logs/*
+backend/storage/framework/cache/*
+backend/storage/framework/sessions/*
+backend/storage/framework/views/*
+backend/bootstrap/cache/*.php
+backend/public/storage
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+*.swp
+
+# Database files and dumps
+*.sql
+*.sqlite
+*.sqlite3
+*.dump
+
+# Operating system
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE
+.idea/
+.vscode/
+# Internal development instructions
+backend/AGENTS.md
+backend/CLAUDE.md
