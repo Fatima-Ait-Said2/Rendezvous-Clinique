@@ -77,6 +77,8 @@ class AuthController extends Controller
         }
 
         $user = $this->loadUserProfile($user);
+	    // Supprimer les anciens tokens avant de créer un nouveau token.
+	    $user->tokens()->delete();
 
         $token = $user->createToken('auth_token')->plainTextToken;
 
@@ -129,6 +131,15 @@ class AuthController extends Controller
         $user->password = $validated['password'];
         $user->must_change_password = false;
         $user->save();
+
+        // Garder le token actuel et supprimer les autres tokens.
+        $currentToken = $user->currentAccessToken();
+
+        if ($currentToken) {
+            $user->tokens()
+                ->where('id', '!=', $currentToken->getKey())
+                ->delete();
+        }
 
         $user = $this->loadUserProfile($user);
 

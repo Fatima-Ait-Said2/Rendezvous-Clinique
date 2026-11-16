@@ -18,26 +18,36 @@ export function AuthProvider({ children }) {
     }
   })
 
+  const saveAuthentication = (data) => {
+    sessionStorage.setItem('token', data.token)
+    sessionStorage.setItem('user', JSON.stringify(data.user))
+
+    setToken(data.token)
+    setUser(data.user)
+  }
 
   const login = async (credentials) => {
     const response = await api.post('/login', credentials)
 
-    const { token, user, must_change_password } = response.data
-
-    sessionStorage.setItem('token', token)
-    sessionStorage.setItem('user', JSON.stringify(user))
-
-    setToken(token)
-    setUser(user)
+    saveAuthentication(response.data)
 
     return {
-      user,
+      user: response.data.user,
       mustChangePassword:
-        must_change_password ?? user?.must_change_password ?? false,
+        response.data.must_change_password ??
+        response.data.user?.must_change_password ??
+        false,
     }
   }
 
- 
+  const register = async (patientData) => {
+    const response = await api.post('/register', patientData)
+
+    saveAuthentication(response.data)
+
+    return response.data
+  }
+
   const logout = async () => {
     try {
       await api.post('/logout')
@@ -50,7 +60,6 @@ export function AuthProvider({ children }) {
     }
   }
 
-  
   const changePassword = async (passwordData) => {
     const response = await api.post('/change-password', passwordData)
 
@@ -69,6 +78,7 @@ export function AuthProvider({ children }) {
     token,
     isAuthenticated: Boolean(token),
     login,
+    register,
     logout,
     changePassword,
   }
@@ -79,7 +89,6 @@ export function AuthProvider({ children }) {
     </AuthContext.Provider>
   )
 }
-
 
 export function useAuth() {
   return useContext(AuthContext)

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 
 function Login() {
@@ -93,6 +93,11 @@ function Login() {
             {loading ? 'Connexion en cours...' : 'Se connecter'}
           </button>
         </form>
+
+        <div className="register-link">
+          <span>Vous êtes patient et vous n'avez pas de compte ?</span>
+          <Link to="/register">Créer un compte</Link>
+        </div>
       </div>
     </main>
   )

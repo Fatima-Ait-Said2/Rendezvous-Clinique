@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\AdminController;
+use App\Http\Controllers\Api\MedecinController;
 
 // Routes publiques
 Route::post('/register', [AuthController::class, 'register'])
@@ -53,11 +54,17 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Médecins
         Route::middleware('role:MEDECIN')->prefix('medecin')->group(function () {
-            Route::get('/dashboard', function () {
-                return response()->json([
-                    'message' => 'Bienvenue dans le tableau de bord Médecin.',
-                ]);
-            });
+            Route::get('/dashboard', [MedecinController::class, 'dashboard']);
+             // Gestion des horaires de travail
+            Route::get('/horaires', [MedecinController::class, 'indexHoraires']);
+            Route::post('/horaires', [MedecinController::class, 'storeHoraire']);
+            Route::put('/horaires/{id}', [MedecinController::class, 'updateHoraire']);
+            Route::delete('/horaires/{id}', [MedecinController::class, 'destroyHoraire']);
+
+                // Gestion des créneaux
+            Route::get('/creneaux', [MedecinController::class, 'indexCreneaux']);
+            Route::post('/creneaux/generer', [MedecinController::class, 'generateCreneaux']);
+            Route::get('/creneaux/{id}', [MedecinController::class, 'showCreneau']);
         });
 
         // Assistants

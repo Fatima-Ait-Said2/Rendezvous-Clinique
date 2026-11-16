@@ -706,3 +706,27 @@
     max-width: none;
   }
 }
+
+.register-link {
+  margin-top: 22px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.register-link a {
+  display: inline-block;
+  color: #2563eb;
+  font-weight: 700;
+  text-decoration: none;
+  padding: 10px;
+  border: 1px solid #2563eb;
+  border-radius: 8px;
+}
+
+.register-link a:hover {
+  background: #2563eb;
+  color: white;
+}
