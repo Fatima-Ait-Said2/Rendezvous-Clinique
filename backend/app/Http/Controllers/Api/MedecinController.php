@@ -1,10 +1,17 @@
 <?php
-
+//sa contient tous les fonctionaliter de medecin 
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Creneau;
 use App\Models\HoraireTravail;
+use App\Models\RendezVous;
+use App\Models\ReservationCreneau;
+use App\Models\Patient;
+use App\Models\DossierMedical;
+use App\Models\Consultation;
+use App\Models\Ordonnance;
+use App\Models\Notification;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -23,7 +30,27 @@ class MedecinController extends Controller
         return $medecin;
     }
 
-    // Vérifier si deux horaires se chevauchent
+    private function notifyPatient(
+        RendezVous $rendezVous,
+        string $titre,
+        string $message,
+        string $type
+    ): void {
+        $rendezVous->loadMissing('patient');
+
+        if ($rendezVous->patient) {
+            Notification::create([
+                'user_id' => $rendezVous->patient->user_id,
+                'rendez_vous_id' => $rendezVous->id,
+                'titre' => $titre,
+                'message' => $message,
+                'type' => $type,
+                'date_envoi' => now(),
+                'lu' => false,
+            ]);
+        }
+    }
+
     private function hasHoraireConflict(
         int $medecinId,
         int $jour,
@@ -43,7 +70,39 @@ class MedecinController extends Controller
         return $query->exists();
     }
 
-    // Afficher les horaires du médecin connecté
+    // =====================================================
+    // TABLEAU DE BORD
+    // =====================================================
+
+    public function dashboard(Request $request)
+    {
+        $medecin = $this->getMedecin($request);
+
+        return response()->json([
+            'rendez_vous_aujourdhui' => $medecin->rendezVous()
+                ->whereHas('creneau', fn ($q) =>
+                    $q->whereDate('date_creneau', today())
+                )
+                ->whereIn('statut', ['EN_ATTENTE', 'CONFIRME'])
+                ->count(),
+
+            'rendez_vous_en_attente' => $medecin->rendezVous()
+                ->where('statut', 'EN_ATTENTE')
+                ->count(),
+
+            'consultations_terminees' => $medecin->consultations()->count(),
+
+            'notifications_non_lues' => $request->user()
+                ->notifications()
+                ->where('lu', false)
+                ->count(),
+        ]);
+    }
+
+    // =====================================================
+    // HORAIRES DE TRAVAIL
+    // =====================================================
+
     public function indexHoraires(Request $request)
     {
         $medecin = $this->getMedecin($request);
@@ -53,7 +112,6 @@ class MedecinController extends Controller
         );
     }
 
-    // Ajouter un horaire
     public function storeHoraire(Request $request)
     {
         $medecin = $this->getMedecin($request);
@@ -73,7 +131,7 @@ class MedecinController extends Controller
         )) {
             throw ValidationException::withMessages([
                 'heure_debut' => [
-                    'Cet horaire chevauche un autre horaire du même jour.'
+                    'Cet horaire chevauche un autre horaire du même jour.',
                 ],
             ]);
         }
@@ -86,16 +144,14 @@ class MedecinController extends Controller
         ], 201);
     }
 
-    // Modifier un horaire
     public function updateHoraire(Request $request, int $id)
     {
         $medecin = $this->getMedecin($request);
-
         $horaire = $medecin->horairesTravail()->findOrFail($id);
 
         if ($horaire->creneaux()->exists()) {
             return response()->json([
-                'message' => 'Impossible de modifier cet horaire car des créneaux ont déjà été générés. Supprimez-le si aucun rendez-vous ne lui est associé, puis recréez-le.',
+                'message' => 'Impossible de modifier cet horaire car des créneaux ont déjà été générés.',
             ], 409);
         }
 
@@ -115,7 +171,7 @@ class MedecinController extends Controller
         )) {
             throw ValidationException::withMessages([
                 'heure_debut' => [
-                    'Cet horaire chevauche un autre horaire du même jour.'
+                    'Cet horaire chevauche un autre horaire du même jour.',
                 ],
             ]);
         }
@@ -128,11 +184,9 @@ class MedecinController extends Controller
         ]);
     }
 
-    // Supprimer un horaire
     public function destroyHoraire(Request $request, int $id)
     {
         $medecin = $this->getMedecin($request);
-
         $horaire = $medecin->horairesTravail()->findOrFail($id);
 
         if ($horaire->creneaux()->whereHas('rendezVous')->exists()) {
@@ -148,7 +202,10 @@ class MedecinController extends Controller
         ]);
     }
 
-    // Afficher les créneaux du médecin
+    // =====================================================
+    // CRENEAUX
+    // =====================================================
+
     public function indexCreneaux(Request $request)
     {
         $medecin = $this->getMedecin($request);
@@ -156,18 +213,23 @@ class MedecinController extends Controller
         $data = $request->validate([
             'date_debut' => 'nullable|date',
             'date_fin' => 'nullable|date|after_or_equal:date_debut',
+            'disponibles' => 'nullable|boolean',
         ]);
 
-        $creneaux = Creneau::whereHas('horaire', function ($query) use ($medecin) {
-            $query->where('medecin_id', $medecin->id);
-        })
+        $creneaux = Creneau::whereHas('horaire', fn ($q) =>
+            $q->where('medecin_id', $medecin->id)
+        )
         ->with('horaire:id,medecin_id,jour_semaine,duree_rendez_vous')
-        ->when($data['date_debut'] ?? null, function ($query, $date) {
-            $query->whereDate('date_creneau', '>=', $date);
-        })
-        ->when($data['date_fin'] ?? null, function ($query, $date) {
-            $query->whereDate('date_creneau', '<=', $date);
-        })
+        ->when($data['date_debut'] ?? null, fn ($q, $date) =>
+            $q->whereDate('date_creneau', '>=', $date)
+        )
+        ->when($data['date_fin'] ?? null, fn ($q, $date) =>
+            $q->whereDate('date_creneau', '<=', $date)
+        )
+        ->when(
+            array_key_exists('disponibles', $data),
+            fn ($q) => $q->where('disponible', $data['disponibles'])
+        )
         ->orderBy('date_creneau')
         ->orderBy('heure_debut')
         ->paginate(100);
@@ -175,7 +237,6 @@ class MedecinController extends Controller
         return response()->json($creneaux);
     }
 
-    // Générer les créneaux entre deux dates
     public function generateCreneaux(Request $request)
     {
         $medecin = $this->getMedecin($request);
@@ -191,9 +252,7 @@ class MedecinController extends Controller
 
         if ($debut->diffInDays($fin) > 90) {
             throw ValidationException::withMessages([
-                'date_fin' => [
-                    'La période ne peut pas dépasser 90 jours.'
-                ],
+                'date_fin' => ['La période ne peut pas dépasser 90 jours.'],
             ]);
         }
 
@@ -211,11 +270,7 @@ class MedecinController extends Controller
             ], 404);
         }
 
-        $created = DB::transaction(function () use (
-            $horaires,
-            $debut,
-            $fin
-        ) {
+        $created = DB::transaction(function () use ($horaires, $debut, $fin) {
             $created = 0;
 
             foreach ($horaires as $horaire) {
@@ -223,31 +278,31 @@ class MedecinController extends Controller
 
                 while ($date->lte($fin)) {
                     if ($date->dayOfWeekIso == $horaire->jour_semaine) {
-                        $heureDebut = Carbon::parse(
+                        $heure = Carbon::parse(
                             $date->toDateString() . ' ' . $horaire->heure_debut
                         );
 
-                        $heureFin = Carbon::parse(
+                        $finHoraire = Carbon::parse(
                             $date->toDateString() . ' ' . $horaire->heure_fin
                         );
 
                         while (
-                            $heureDebut->copy()
+                            $heure->copy()
                                 ->addMinutes($horaire->duree_rendez_vous)
-                                ->lte($heureFin)
+                                ->lte($finHoraire)
                         ) {
-                            $slotEnd = $heureDebut->copy()
+                            $finCreneau = $heure->copy()
                                 ->addMinutes($horaire->duree_rendez_vous);
 
-                            if ($heureDebut->gt(now())) {
+                            if ($heure->gt(now())) {
                                 $creneau = Creneau::firstOrCreate(
                                     [
                                         'horaire_id' => $horaire->id,
                                         'date_creneau' => $date->toDateString(),
-                                        'heure_debut' => $heureDebut->format('H:i:s'),
+                                        'heure_debut' => $heure->format('H:i:s'),
                                     ],
                                     [
-                                        'heure_fin' => $slotEnd->format('H:i:s'),
+                                        'heure_fin' => $finCreneau->format('H:i:s'),
                                         'disponible' => true,
                                     ]
                                 );
@@ -257,9 +312,7 @@ class MedecinController extends Controller
                                 }
                             }
 
-                            $heureDebut->addMinutes(
-                                $horaire->duree_rendez_vous
-                            );
+                            $heure->addMinutes($horaire->duree_rendez_vous);
                         }
                     }
 
@@ -276,50 +329,549 @@ class MedecinController extends Controller
         ]);
     }
 
-
-    // Tableau de bord du médecin
-    public function dashboard(Request $request)
-    {
-        $medecin = $this->getMedecin($request);
-
-        $rendezVousAujourdhui = $medecin->rendezVous()
-            ->whereHas('creneau', function ($query) {
-                $query->whereDate('date_creneau', today());
-            })
-            ->whereIn('statut', ['EN_ATTENTE', 'CONFIRME'])
-            ->count();
-
-        $rendezVousEnAttente = $medecin->rendezVous()
-            ->where('statut', 'EN_ATTENTE')
-            ->count();
-
-        $consultationsTerminees = $medecin->consultations()->count();
-
-        $notificationsNonLues = $request->user()
-            ->notifications()
-            ->where('lu', false)
-            ->count();
-
-        return response()->json([
-            'rendez_vous_aujourdhui' => $rendezVousAujourdhui,
-            'rendez_vous_en_attente' => $rendezVousEnAttente,
-            'consultations_terminees' => $consultationsTerminees,
-            'notifications_non_lues' => $notificationsNonLues,
-        ]);
-    }
-
-    // Afficher un créneau appartenant au médecin connecté
     public function showCreneau(Request $request, int $id)
     {
         $medecin = $this->getMedecin($request);
 
-        $creneau = Creneau::whereHas('horaire', function ($query) use ($medecin) {
-            $query->where('medecin_id', $medecin->id);
-        })
+        $creneau = Creneau::whereHas('horaire', fn ($q) =>
+            $q->where('medecin_id', $medecin->id)
+        )
         ->with('horaire')
         ->findOrFail($id);
 
         return response()->json($creneau);
     }
 
+    // =====================================================
+    // RENDEZ-VOUS
+    // =====================================================
+
+    public function indexRendezVous(Request $request)
+    {
+        $medecin = $this->getMedecin($request);
+
+        $data = $request->validate([
+            'statut' => 'nullable|in:EN_ATTENTE,CONFIRME,ANNULE,TERMINE',
+            'date_debut' => 'nullable|date',
+            'date_fin' => 'nullable|date|after_or_equal:date_debut',
+            'search' => 'nullable|string|max:100',
+        ]);
+
+        $query = $medecin->rendezVous()
+            ->with([
+                'patient.user:id,nom,prenom,email,telephone',
+                'creneau',
+                'consultation',
+            ])
+            ->when($data['statut'] ?? null, fn ($q, $statut) =>
+                $q->where('statut', $statut)
+            )
+            ->when($data['date_debut'] ?? null, fn ($q, $date) =>
+                $q->whereHas('creneau', fn ($slot) =>
+                    $slot->whereDate('date_creneau', '>=', $date)
+                )
+            )
+            ->when($data['date_fin'] ?? null, fn ($q, $date) =>
+                $q->whereHas('creneau', fn ($slot) =>
+                    $slot->whereDate('date_creneau', '<=', $date)
+                )
+            )
+            ->when($data['search'] ?? null, function ($q, $search) {
+                $q->whereHas('patient.user', function ($user) use ($search) {
+                    $user->where('nom', 'like', "%{$search}%")
+                        ->orWhere('prenom', 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%");
+                });
+            })
+            ->orderByDesc(
+                Creneau::select('date_creneau')
+                    ->whereColumn('creneaux.id', 'rendez_vous.creneau_id')
+            );
+
+        return response()->json($query->paginate(20));
+    }
+
+    public function confirmerRendezVous(Request $request, int $id)
+    {
+        $medecin = $this->getMedecin($request);
+
+        $rendezVous = DB::transaction(function () use ($medecin, $id) {
+            $rdv = $medecin->rendezVous()
+                ->lockForUpdate()
+                ->findOrFail($id);
+
+            if ($rdv->statut !== 'EN_ATTENTE') {
+                abort(409, 'Ce rendez-vous ne peut plus être confirmé.');
+            }
+
+            $rdv->update(['statut' => 'CONFIRME']);
+
+            return $rdv->load(['patient', 'creneau']);
+        });
+
+        $this->notifyPatient(
+            $rendezVous,
+            'Rendez-vous confirmé',
+            'Votre rendez-vous a été confirmé par le médecin.',
+            'CONFIRMATION'
+        );
+
+        return response()->json([
+            'message' => 'Rendez-vous confirmé.',
+            'rendez_vous' => $rendezVous,
+        ]);
+    }
+
+    public function annulerRendezVous(Request $request, int $id)
+    {
+        $medecin = $this->getMedecin($request);
+
+        $rendezVous = DB::transaction(function () use ($medecin, $id) {
+            $rdv = $medecin->rendezVous()
+                ->with('creneau')
+                ->lockForUpdate()
+                ->findOrFail($id);
+
+            if (!in_array($rdv->statut, ['EN_ATTENTE', 'CONFIRME'])) {
+                abort(409, 'Ce rendez-vous ne peut pas être annulé.');
+            }
+
+            if ($rdv->consultation()->exists()) {
+                abort(409, 'Impossible d’annuler un rendez-vous avec une consultation.');
+            }
+
+            $reservation = ReservationCreneau::where(
+                'rendez_vous_id',
+                $rdv->id
+            )->lockForUpdate()->first();
+
+            if ($reservation) {
+                $reservation->delete();
+            }
+
+            Creneau::whereKey($rdv->creneau_id)
+                ->lockForUpdate()
+                ->update(['disponible' => true]);
+
+            $rdv->update(['statut' => 'ANNULE']);
+
+            return $rdv->load(['patient', 'creneau']);
+        });
+
+        $this->notifyPatient(
+            $rendezVous,
+            'Rendez-vous annulé',
+            'Votre rendez-vous a été annulé par le médecin.',
+            'ANNULATION'
+        );
+
+        return response()->json([
+            'message' => 'Rendez-vous annulé et créneau libéré.',
+        ]);
+    }
+
+    public function creneauxDisponibles(Request $request)
+    {
+        $medecin = $this->getMedecin($request);
+
+        $data = $request->validate([
+            'date_debut' => 'nullable|date',
+            'date_fin' => 'nullable|date|after_or_equal:date_debut',
+        ]);
+
+        $creneaux = Creneau::whereHas('horaire', fn ($q) =>
+            $q->where('medecin_id', $medecin->id)
+        )
+        ->where('disponible', true)
+        ->whereDoesntHave('reservationActive')
+        ->where(function ($q) {
+            $q->whereDate('date_creneau', '>', today())
+                ->orWhere(function ($today) {
+                    $today->whereDate('date_creneau', today())
+                        ->where('heure_debut', '>', now()->format('H:i:s'));
+                });
+        })
+        ->when($data['date_debut'] ?? null, fn ($q, $date) =>
+            $q->whereDate('date_creneau', '>=', $date)
+        )
+        ->when($data['date_fin'] ?? null, fn ($q, $date) =>
+            $q->whereDate('date_creneau', '<=', $date)
+        )
+        ->orderBy('date_creneau')
+        ->orderBy('heure_debut')
+        ->limit(200)
+        ->get();
+
+        return response()->json($creneaux);
+    }
+
+    public function reprogrammerRendezVous(Request $request, int $id)
+    {
+        $medecin = $this->getMedecin($request);
+
+        $data = $request->validate([
+            'creneau_id' => 'required|integer',
+        ]);
+
+        $nouveauRdv = DB::transaction(function () use ($medecin, $id, $data) {
+            $ancien = $medecin->rendezVous()
+                ->with('patient')
+                ->lockForUpdate()
+                ->findOrFail($id);
+
+            if (!in_array($ancien->statut, ['EN_ATTENTE', 'CONFIRME'])) {
+                abort(409, 'Ce rendez-vous ne peut pas être reprogrammé.');
+            }
+
+            if ($ancien->consultation()->exists()) {
+                abort(409, 'Un rendez-vous avec consultation ne peut pas être modifié.');
+            }
+
+            $nouveauCreneau = Creneau::whereHas('horaire', fn ($q) =>
+                $q->where('medecin_id', $medecin->id)
+            )
+            ->lockForUpdate()
+            ->findOrFail($data['creneau_id']);
+
+            if (
+                !$nouveauCreneau->disponible ||
+                ReservationCreneau::where('creneau_id', $nouveauCreneau->id)->exists()
+            ) {
+                abort(409, 'Ce créneau n’est plus disponible.');
+            }
+
+            if (
+                Carbon::parse(
+                    $nouveauCreneau->date_creneau->toDateString()
+                    . ' ' . $nouveauCreneau->heure_debut
+                )->lte(now())
+            ) {
+                abort(422, 'Choisissez un créneau futur.');
+            }
+
+            if ($ancien->creneau_id == $nouveauCreneau->id) {
+                abort(422, 'Choisissez un créneau différent.');
+            }
+
+            $ancienneReservation = ReservationCreneau::where(
+                'rendez_vous_id',
+                $ancien->id
+            )->lockForUpdate()->first();
+
+            if ($ancienneReservation) {
+                $ancienneReservation->delete();
+            }
+
+            Creneau::whereKey($ancien->creneau_id)
+                ->lockForUpdate()
+                ->update(['disponible' => true]);
+
+            $ancien->update(['statut' => 'ANNULE']);
+
+            $nouveau = RendezVous::create([
+                'patient_id' => $ancien->patient_id,
+                'medecin_id' => $medecin->id,
+                'creneau_id' => $nouveauCreneau->id,
+                'assistant_id' => $ancien->assistant_id,
+                'motif' => $ancien->motif,
+                'statut' => 'EN_ATTENTE',
+                'rendez_vous_precedent_id' => $ancien->id,
+            ]);
+
+            ReservationCreneau::create([
+                'creneau_id' => $nouveauCreneau->id,
+                'rendez_vous_id' => $nouveau->id,
+            ]);
+
+            $nouveauCreneau->update(['disponible' => false]);
+
+            return $nouveau->load(['patient', 'creneau']);
+        });
+
+        $this->notifyPatient(
+            $nouveauRdv,
+            'Rendez-vous reprogrammé',
+            'Votre rendez-vous a été déplacé. Le nouveau rendez-vous est en attente de confirmation.',
+            'CONFIRMATION'
+        );
+
+        return response()->json([
+            'message' => 'Rendez-vous reprogrammé. Le nouveau rendez-vous est en attente.',
+            'rendez_vous' => $nouveauRdv,
+        ], 201);
+    }
+
+    // =====================================================
+    // DOSSIERS MEDICAUX
+    // =====================================================
+
+    public function indexDossiers(Request $request)
+    {
+        $medecin = $this->getMedecin($request);
+
+        $patients = Patient::whereHas('rendezVous', function ($q) use ($medecin) {
+            $q->where('medecin_id', $medecin->id)
+                ->where('statut', '!=', 'ANNULE');
+        })
+        ->with(['user:id,nom,prenom,email,telephone', 'dossierMedical'])
+        ->orderByDesc('id')
+        ->paginate(20);
+
+        return response()->json($patients);
+    }
+
+    public function showDossier(Request $request, int $patientId)
+    {
+        $medecin = $this->getMedecin($request);
+
+        $patient = Patient::whereKey($patientId)
+            ->whereHas('rendezVous', function ($q) use ($medecin) {
+                $q->where('medecin_id', $medecin->id)
+                    ->where('statut', '!=', 'ANNULE');
+            })
+            ->with([
+                'user:id,nom,prenom,email,telephone',
+                'dossierMedical.consultations' => fn ($q) =>
+                    $q->where('medecin_id', $medecin->id)
+                        ->with([
+                            'rendezVous.creneau',
+                            'ordonnances.lignes',
+                        ])
+                        ->orderByDesc('date_consultation'),
+            ])
+            ->firstOrFail();
+
+        return response()->json($patient);
+    }
+
+    // =====================================================
+    // CONSULTATIONS
+    // =====================================================
+
+    public function indexConsultations(Request $request)
+    {
+        $medecin = $this->getMedecin($request);
+
+        $consultations = $medecin->consultations()
+            ->with([
+                'dossierMedical.patient.user:id,nom,prenom,email,telephone',
+                'rendezVous.creneau',
+                'ordonnances.lignes',
+            ])
+            ->orderByDesc('date_consultation')
+            ->paginate(20);
+
+        return response()->json($consultations);
+    }
+
+    public function storeConsultation(Request $request, int $rendezVousId)
+    {
+        $medecin = $this->getMedecin($request);
+
+        $data = $request->validate([
+            'diagnostic' => 'required|string',
+            'notes' => 'nullable|string',
+        ]);
+
+        $consultation = DB::transaction(function () use (
+            $medecin,
+            $rendezVousId,
+            $data
+        ) {
+            $rdv = $medecin->rendezVous()
+                ->lockForUpdate()
+                ->findOrFail($rendezVousId);
+
+            if ($rdv->statut !== 'CONFIRME') {
+                abort(409, 'Le rendez-vous doit être confirmé avant la consultation.');
+            }
+
+            if ($rdv->consultation()->exists()) {
+                abort(409, 'Une consultation existe déjà pour ce rendez-vous.');
+            }
+
+            $dossier = DossierMedical::firstOrCreate(
+                ['patient_id' => $rdv->patient_id],
+                ['date_creation' => now()]
+            );
+
+            $consultation = Consultation::create([
+                'dossier_medical_id' => $dossier->id,
+                'medecin_id' => $medecin->id,
+                'rendez_vous_id' => $rdv->id,
+                'date_consultation' => now(),
+                'diagnostic' => $data['diagnostic'],
+                'notes' => $data['notes'] ?? null,
+            ]);
+
+            $rdv->update(['statut' => 'TERMINE']);
+
+            return $consultation->load([
+                'dossierMedical.patient.user',
+                'rendezVous.creneau',
+            ]);
+        });
+
+        return response()->json([
+            'message' => 'Consultation enregistrée et rendez-vous terminé.',
+            'consultation' => $consultation,
+        ], 201);
+    }
+
+    public function updateConsultation(Request $request, int $id)
+    {
+        $medecin = $this->getMedecin($request);
+
+        $consultation = $medecin->consultations()->findOrFail($id);
+
+        $data = $request->validate([
+            'diagnostic' => 'required|string',
+            'notes' => 'nullable|string',
+        ]);
+
+        $consultation->update($data);
+
+        return response()->json([
+            'message' => 'Consultation modifiée.',
+            'consultation' => $consultation->fresh(),
+        ]);
+    }
+
+    // =====================================================
+    // ORDONNANCES
+    // =====================================================
+
+    public function indexOrdonnances(Request $request)
+    {
+        $medecin = $this->getMedecin($request);
+
+        $ordonnances = Ordonnance::whereHas(
+            'consultation',
+            fn ($q) => $q->where('medecin_id', $medecin->id)
+        )
+        ->with([
+            'consultation.dossierMedical.patient.user:id,nom,prenom',
+            'consultation.rendezVous.creneau',
+            'lignes',
+        ])
+        ->orderByDesc('date_creation')
+        ->paginate(20);
+
+        return response()->json($ordonnances);
+    }
+
+    public function storeOrdonnance(Request $request, int $consultationId)
+    {
+        $medecin = $this->getMedecin($request);
+
+        $data = $request->validate([
+            'instructions' => 'nullable|string',
+            'lignes' => 'required|array|min:1',
+            'lignes.*.nom_medicament' => 'required|string|max:255',
+            'lignes.*.dosage' => 'required|string|max:255',
+            'lignes.*.frequence' => 'required|string|max:255',
+            'lignes.*.duree' => 'required|string|max:255',
+            'lignes.*.quantite' => 'nullable|string|max:100',
+            'lignes.*.instructions' => 'nullable|string',
+        ]);
+
+        $consultation = $medecin->consultations()->findOrFail($consultationId);
+
+        $ordonnance = DB::transaction(function () use ($consultation, $data) {
+            $ordonnance = Ordonnance::create([
+                'consultation_id' => $consultation->id,
+                'date_creation' => today(),
+                'instructions' => $data['instructions'] ?? null,
+            ]);
+
+            foreach ($data['lignes'] as $ligne) {
+                $ordonnance->lignes()->create($ligne);
+            }
+
+            return $ordonnance->load('lignes');
+        });
+
+        return response()->json([
+            'message' => 'Ordonnance créée.',
+            'ordonnance' => $ordonnance,
+        ], 201);
+    }
+
+    public function updateOrdonnance(Request $request, int $id)
+    {
+        $medecin = $this->getMedecin($request);
+
+        $ordonnance = Ordonnance::whereHas(
+            'consultation',
+            fn ($q) => $q->where('medecin_id', $medecin->id)
+        )->findOrFail($id);
+
+        $data = $request->validate([
+            'instructions' => 'nullable|string',
+            'lignes' => 'required|array|min:1',
+            'lignes.*.nom_medicament' => 'required|string|max:255',
+            'lignes.*.dosage' => 'required|string|max:255',
+            'lignes.*.frequence' => 'required|string|max:255',
+            'lignes.*.duree' => 'required|string|max:255',
+            'lignes.*.quantite' => 'nullable|string|max:100',
+            'lignes.*.instructions' => 'nullable|string',
+        ]);
+
+        DB::transaction(function () use ($ordonnance, $data) {
+            $ordonnance->update([
+                'instructions' => $data['instructions'] ?? null,
+            ]);
+
+            $ordonnance->lignes()->delete();
+
+            foreach ($data['lignes'] as $ligne) {
+                $ordonnance->lignes()->create($ligne);
+            }
+        });
+
+        return response()->json([
+            'message' => 'Ordonnance modifiée.',
+            'ordonnance' => $ordonnance->fresh('lignes'),
+        ]);
+    }
+
+    // =====================================================
+    // NOTIFICATIONS
+    // =====================================================
+
+    public function indexNotifications(Request $request)
+    {
+        $notifications = $request->user()
+            ->notifications()
+            ->with('rendezVous.creneau')
+            ->orderByDesc('created_at')
+            ->paginate(30);
+
+        return response()->json($notifications);
+    }
+
+    public function marquerNotificationLue(Request $request, int $id)
+    {
+        $notification = $request->user()
+            ->notifications()
+            ->findOrFail($id);
+
+        $notification->update(['lu' => true]);
+
+        return response()->json([
+            'message' => 'Notification marquée comme lue.',
+        ]);
+    }
+
+    public function marquerToutesNotificationsLues(Request $request)
+    {
+        $request->user()
+            ->notifications()
+            ->where('lu', false)
+            ->update(['lu' => true]);
+
+        return response()->json([
+            'message' => 'Toutes les notifications sont marquées comme lues.',
+        ]);
+    }
 }
