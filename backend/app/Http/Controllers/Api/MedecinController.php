@@ -219,7 +219,10 @@ class MedecinController extends Controller
         $creneaux = Creneau::whereHas('horaire', fn ($q) =>
             $q->where('medecin_id', $medecin->id)
         )
-        ->with('horaire:id,medecin_id,jour_semaine,duree_rendez_vous')
+        ->with([
+            'horaire:id,medecin_id,jour_semaine,duree_rendez_vous',
+            'reservationActive:id,creneau_id',
+        ])
         ->when($data['date_debut'] ?? null, fn ($q, $date) =>
             $q->whereDate('date_creneau', '>=', $date)
         )
@@ -326,6 +329,67 @@ class MedecinController extends Controller
         return response()->json([
             'message' => 'Génération des créneaux terminée.',
             'creneaux_crees' => $created,
+        ]);
+    }
+        public function bloquerCreneau(Request $request, int $id)
+    {
+        return $this->changerEtatCreneau($request, $id, true);
+    }
+
+    public function debloquerCreneau(Request $request, int $id)
+    {
+        return $this->changerEtatCreneau($request, $id, false);
+    }
+
+    private function changerEtatCreneau(
+        Request $request,
+        int $id,
+        bool $bloquer
+    ) {
+        $medecin = $this->getMedecin($request);
+
+        DB::transaction(function () use ($medecin, $id, $bloquer) {
+            $creneau = Creneau::whereHas('horaire', fn ($q) =>
+                $q->where('medecin_id', $medecin->id)
+            )
+            ->lockForUpdate()
+            ->findOrFail($id);
+
+            $reservationExiste = ReservationCreneau::where(
+                'creneau_id',
+                $creneau->id
+            )->exists();
+
+            $rendezVousActifExiste = RendezVous::where(
+                'creneau_id',
+                $creneau->id
+            )
+            ->whereIn('statut', ['EN_ATTENTE', 'CONFIRME'])
+            ->exists();
+
+            if ($reservationExiste || $rendezVousActifExiste) {
+                abort(409, 'Impossible de modifier un créneau réservé par un rendez-vous actif.');
+            }
+
+            if ($bloquer) {
+                if (!$creneau->disponible) {
+                    abort(409, 'Ce créneau est déjà bloqué.');
+                }
+
+                $creneau->update(['disponible' => false]);
+            } else {
+                if ($creneau->disponible) {
+                    abort(409, 'Ce créneau est déjà disponible.');
+                }
+
+                $creneau->update(['disponible' => true]);
+            }
+        });
+
+        return response()->json([
+            'message' => $bloquer
+                ? 'Créneau bloqué avec succès.'
+                : 'Créneau débloqué avec succès.',
         ]);
     }
 

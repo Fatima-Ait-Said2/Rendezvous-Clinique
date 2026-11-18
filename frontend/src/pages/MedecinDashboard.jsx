@@ -295,6 +295,7 @@ function MedecinContent({ section }) {
     }
   }
 
+
   async function generateCreneaux(event) {
     event.preventDefault()
     setError('')
@@ -312,6 +313,26 @@ function MedecinContent({ section }) {
       setError(errorMessage(err))
     }
   }
+
+  async function updateCreneauStatus(id, action) {
+    setError('')
+    setMessage('')
+
+    try {
+      await api.patch(`/medecin/creneaux/${id}/${action}`)
+
+      setMessage(
+        action === 'bloquer'
+          ? 'Créneau bloqué avec succès.'
+          : 'Créneau débloqué avec succès.'
+      )
+
+      await loadCreneaux()
+    } catch (err) {
+      setError(errorMessage(err))
+    }
+  }
+
 
   async function confirmRendezVous(id) {
     if (!window.confirm('Confirmer ce rendez-vous ?')) return
@@ -734,6 +755,7 @@ function MedecinContent({ section }) {
                       <th align="left">Début</th>
                       <th align="left">Fin</th>
                       <th align="left">État</th>
+                      <th align="left">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -742,7 +764,33 @@ function MedecinContent({ section }) {
                         <td>{dateLabel(creneau.date_creneau)}</td>
                         <td>{timeLabel(creneau.heure_debut)}</td>
                         <td>{timeLabel(creneau.heure_fin)}</td>
-                        <td>{creneau.disponible ? 'Disponible' : 'Indisponible'}</td>
+                        <td>
+                          {creneau.disponible
+                            ? 'Disponible'
+                            : creneau.reservation_active
+                              ? 'Réservé'
+                              : 'Bloqué'}
+                        </td>
+
+                        <td>
+                          {creneau.disponible ? (
+                            <button
+                              style={dangerButton}
+                              onClick={() => updateCreneauStatus(creneau.id, 'bloquer')}
+                            >
+                              Bloquer
+                            </button>
+                          ) : !creneau.reservation_active ? (
+                            <button
+                              style={successButton}
+                              onClick={() => updateCreneauStatus(creneau.id, 'debloquer')}
+                            >
+                              Débloquer
+                            </button>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -854,14 +902,23 @@ function MedecinContent({ section }) {
                 setDossierDetail(null)
                 setSelectedPatient(null)
               }}>Fermer le dossier</button>
+              <div style={{ marginTop: 20 }}>
+                <h4>Informations du patient</h4>
+                <p><strong>Nom :</strong> {dossierDetail.user?.nom || '—'}</p>
+                <p><strong>Prénom :</strong> {dossierDetail.user?.prenom || '—'}</p>
+                <p><strong>Email :</strong> {dossierDetail.user?.email || '—'}</p>
+                <p><strong>Téléphone :</strong> {dossierDetail.user?.telephone || '—'}</p>
 
-              <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>
-                {JSON.stringify(dossierDetail.patient || dossierDetail.dossier || {}, null, 2)}
-              </pre>
+                <h4>Dossier médical</h4>
+                <p>
+                  <strong>Date de création :</strong>{' '}
+                  {dateLabel(dossierDetail.dossier_medical?.date_creation)}
+                </p>
+              </div>
 
               <h4>Historique des consultations</h4>
               {(() => {
-                const items = dossierDetail.consultations || dossierDetail.dossier?.consultations || []
+                const items =dossierDetail.dossier_medical?.consultations || []
                 return items.length ? items.map(item => (
                   <div key={item.id} style={{ borderTop: '1px solid #e5e7eb', padding: '12px 0' }}>
                     <strong>{dateLabel(item.date_consultation)}</strong>

@@ -454,3 +454,11 @@
     align-items: flex-start;
   }
 }
+
+.portal-profile-label {
+  display: inline-block;
+  margin-bottom: 8px;
+  color: #3478a8;
+  font-size: 13px;
+  font-weight: 700;
+}

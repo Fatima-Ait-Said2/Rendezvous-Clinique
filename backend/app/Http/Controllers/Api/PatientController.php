@@ -44,7 +44,7 @@ class PatientController extends Controller
             abort(409, 'Ce rendez-vous possède déjà une consultation.');
         }
 
-        if ($this->appointmentDateTime($rdv)->lte(now()->addHours(24))) {
+        if ($this->appointmentDateTime($rdv)->lt(now()->addHours(24))) {
             throw ValidationException::withMessages([
                 'rendez_vous' => [
                     'La modification ou l’annulation est possible au moins 24 heures avant le rendez-vous.',
@@ -157,6 +157,7 @@ class PatientController extends Controller
         $creneaux = Creneau::whereHas('horaire', fn ($q) =>
             $q->where('medecin_id', $data['medecin_id'])
         )
+            ->whereHas('horaire.medecin.user')
             ->where('disponible', true)
             ->whereDoesntHave('reservationActive')
             ->where(function ($q) {
@@ -198,6 +199,7 @@ class PatientController extends Controller
             $creneau = Creneau::whereHas('horaire', fn ($q) =>
                 $q->where('medecin_id', $data['medecin_id'])
             )
+                ->whereHas('horaire.medecin.user')
                 ->lockForUpdate()
                 ->findOrFail($data['creneau_id']);
 
@@ -326,6 +328,7 @@ class PatientController extends Controller
             $nouveauCreneau = Creneau::whereHas('horaire', fn ($q) =>
                 $q->where('medecin_id', $ancien->medecin_id)
             )
+                ->whereHas('horaire.medecin.user')
                 ->lockForUpdate()
                 ->findOrFail($data['creneau_id']);
 

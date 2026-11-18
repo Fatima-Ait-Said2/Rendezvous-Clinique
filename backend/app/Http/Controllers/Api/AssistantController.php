@@ -258,6 +258,7 @@ class AssistantController extends Controller
         $creneaux = Creneau::whereHas('horaire', fn ($q) =>
             $q->where('medecin_id', $selectedDoctorId)
         )
+        ->whereHas('horaire.medecin.user')  
         ->where('disponible', true)
         ->whereDoesntHave('reservationActive')
         ->where(function ($q) {
@@ -360,6 +361,7 @@ class AssistantController extends Controller
             $creneau = Creneau::whereHas('horaire', fn ($q) =>
                 $q->where('medecin_id', $selectedDoctorId)
             )
+            ->whereHas('horaire.medecin.user')
             ->lockForUpdate()
             ->findOrFail($data['creneau_id']);
 
@@ -402,6 +404,54 @@ class AssistantController extends Controller
             'rendez_vous' => $rdv,
         ], 201);
     }
+
+
+
+    public function confirmerRendezVous(Request $request, int $id)
+    {
+        $assistant = $this->getAssistant($request);
+
+        // Seule l'assistante spécialisée peut confirmer.
+        if ($assistant->type_assistant !== 'SPECIALISE') {
+            abort(403, 'Seule une assistante spécialisée peut confirmer les rendez-vous.');
+        }
+
+        $rdv = DB::transaction(function () use ($request, $id) {
+            // appointmentQuery limite déjà les rendez-vous au médecin assigné.
+            $rdv = $this->appointmentQuery($request)
+                ->lockForUpdate()
+                ->findOrFail($id);
+
+            if ($rdv->statut !== 'EN_ATTENTE') {
+                abort(409, 'Ce rendez-vous ne peut plus être confirmé.');
+            }
+
+            $rdv->update([
+                'statut' => 'CONFIRME',
+            ]);
+
+            return $rdv->load('patient');
+        });
+
+        if ($rdv->patient) {
+            Notification::create([
+                'user_id' => $rdv->patient->user_id,
+                'rendez_vous_id' => $rdv->id,
+                'titre' => 'Rendez-vous confirmé',
+                'message' => 'Votre rendez-vous a été confirmé par l’assistante spécialisée.',
+                'type' => 'CONFIRMATION',
+                'date_envoi' => now(),
+                'lu' => false,
+            ]);
+        }
+
+        return response()->json([
+            'message' => 'Rendez-vous confirmé.',
+            'rendez_vous' => $rdv,
+        ]);
+    }
+
+
 
     public function annulerRendezVous(Request $request, int $id)
     {
@@ -484,6 +534,7 @@ class AssistantController extends Controller
             $creneau = Creneau::whereHas('horaire', fn ($q) =>
                 $q->where('medecin_id', $selectedDoctorId)
             )
+            ->whereHas('horaire.medecin.user')
             ->lockForUpdate()
             ->findOrFail($data['creneau_id']);
 

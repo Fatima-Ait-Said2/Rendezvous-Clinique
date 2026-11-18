@@ -356,6 +356,32 @@ function AssistantDashboard() {
       setSaving(false)
     }
   }
+  
+  const handleConfirmAppointment = async (id) => {
+    if (!window.confirm('Voulez-vous confirmer ce rendez-vous ?')) return
+
+    clearMessages()
+    setSaving(true)
+
+    try {
+      const response = await api.post(
+        `/assistant/rendez-vous/${id}/confirmer`
+      )
+
+      setSuccess(response.data?.message || 'Rendez-vous confirmé.')
+
+      await Promise.all([
+        loadRendezVous(),
+        refreshDashboard(),
+      ])
+    } catch (err) {
+      setError(getError(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+
 
   const startReprogramming = async (appointment) => {
     clearMessages()
@@ -785,6 +811,18 @@ function AssistantDashboard() {
                     <td>
                       {['EN_ATTENTE', 'CONFIRME'].includes(rdv.statut) && (
                         <div className="assistant-actions">
+
+                          {isSpecialized && rdv.statut === 'EN_ATTENTE' && (
+                            <button
+                              type="button"
+                              className="assistant-button secondary small"
+                              onClick={() => handleConfirmAppointment(rdv.id)}
+                              disabled={saving}
+                            >
+                              Confirmer
+                            </button>
+                          )}
+
                           <button
                             type="button"
                             className="assistant-button secondary small"
@@ -1042,6 +1080,9 @@ function AssistantDashboard() {
       roleLabel="Espace assistant"
       title="Espace assistant"
       subtitle="Bienvenue dans votre espace professionnel."
+      profileLabel={
+        typeAssistant =='SPECIALISE' ? 'Assistant spécialisé' : typeAssistant === 'RECEPTION' ? 'Assistant Génerale':''
+      }
       menu={menu}
     >
       {(section) => (

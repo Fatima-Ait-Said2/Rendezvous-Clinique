@@ -113,14 +113,51 @@ class AdminController extends Controller
 
     public function deactivateMedecin($id)
     {
-        $user = User::where('role', 'MEDECIN')->findOrFail($id);
+        return DB::transaction(function () use ($id) {
+            $user = User::where('role', 'MEDECIN')
+                ->lockForUpdate()
+                ->findOrFail($id);
 
-        $user->tokens()->delete();
-        $user->delete();
+            $medecin = $user->medecin;
 
-        return response()->json([
-            'message' => 'Compte médecin désactivé avec succès.',
-        ]);
+            if ($medecin) {
+                $hasFutureAppointments = $medecin->rendezVous()
+                    ->whereIn('statut', ['EN_ATTENTE', 'CONFIRME'])
+                    ->whereHas('creneau', function ($query) {
+                        $query->where(function ($q) {
+                            $q->whereDate(
+                                'date_creneau',
+                                '>',
+                                now()->toDateString()
+                            )->orWhere(function ($sameDay) {
+                                $sameDay->whereDate(
+                                    'date_creneau',
+                                    now()->toDateString()
+                                )->where(
+                                    'heure_debut',
+                                    '>',
+                                    now()->format('H:i:s')
+                                );
+                            });
+                        });
+                    })
+                    ->exists();
+
+                if ($hasFutureAppointments) {
+                    abort(
+                        409,
+                        'Impossible de désactiver ce médecin : il possède des rendez-vous futurs en attente ou confirmés. Veuillez d’abord régulariser ses rendez-vous.'
+                    );
+                }
+            }
+
+            $user->tokens()->delete();
+            $user->delete();
+
+            return response()->json([
+                'message' => 'Compte médecin désactivé avec succès.',
+            ]);
+        });
     }
 
     public function reactivateMedecin($id)

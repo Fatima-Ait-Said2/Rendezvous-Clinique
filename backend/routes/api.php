@@ -62,7 +62,9 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/creneaux', [MedecinController::class, 'indexCreneaux']);
             Route::post('/creneaux/generer', [MedecinController::class, 'generateCreneaux']);
             Route::get('/creneaux-disponibles', [MedecinController::class, 'creneauxDisponibles']);
-            Route::get('/creneaux/{id}', [MedecinController::class, 'showCreneau']);
+            Route::patch('/creneaux/{id}/bloquer', [MedecinController::class, 'bloquerCreneau']);
+            Route::patch('/creneaux/{id}/debloquer', [MedecinController::class, 'debloquerCreneau']);
+            
 
             // Rendez-vous
             Route::get('/rendez-vous', [MedecinController::class, 'indexRendezVous']);
@@ -113,6 +115,7 @@ Route::middleware('auth:sanctum')->group(function () {
                 // Rendez-vous
                 Route::get('/rendez-vous', 'indexRendezVous');
                 Route::post('/rendez-vous', 'storeRendezVous');
+                Route::post('/rendez-vous/{id}/confirmer', 'confirmerRendezVous');
                 Route::post('/rendez-vous/{id}/annuler', 'annulerRendezVous');
                 Route::post('/rendez-vous/{id}/reprogrammer', 'reprogrammerRendezVous');
 

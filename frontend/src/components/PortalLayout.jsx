@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useAuth } from '../auth/AuthContext'
 import '../Portal.css'
 
-function PortalLayout({ roleLabel, title, subtitle, menu, children }) {
+function PortalLayout({ roleLabel, title, subtitle, menu, children,profileLabel }) {
   const { user, logout } = useAuth()
   const [activeSection, setActiveSection] = useState(menu[0]?.id || 'dashboard')
 
@@ -70,6 +70,7 @@ function PortalLayout({ roleLabel, title, subtitle, menu, children }) {
         <div className="portal-content">
           <div className="portal-page-heading">
             <div>
+              {profileLabel &&(<span className="portal-profile-label">{profileLabel}</span>)}
               <h1>{activeItem?.heading || title}</h1>
               <p>{activeItem?.description || subtitle}</p>
             </div>

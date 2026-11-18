@@ -62,7 +62,14 @@ function getError(error) {
 
 function isMoreThan24Hours(slot) {
   if (!slot?.date_creneau || !slot?.heure_debut) return false
-  const appointment = new Date(`${slot.date_creneau}T${slot.heure_debut}`)
+
+  const date = String(slot.date_creneau).slice(0, 10)
+  const time = String(slot.heure_debut)
+
+  const appointment = new Date(`${date}T${time}`)
+
+  if (Number.isNaN(appointment.getTime())) return false
+
   return appointment.getTime() - Date.now() >= 24 * 60 * 60 * 1000
 }
 
