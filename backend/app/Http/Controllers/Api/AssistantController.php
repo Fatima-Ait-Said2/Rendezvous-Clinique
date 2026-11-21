@@ -289,43 +289,58 @@ class AssistantController extends Controller
 
     public function indexRendezVous(Request $request)
     {
-        $data = $request->validate([
-            'statut' => 'nullable|in:EN_ATTENTE,CONFIRME,ANNULE,TERMINE',
-            'date_debut' => 'nullable|date',
-            'date_fin' => 'nullable|date|after_or_equal:date_debut',
-            'search' => 'nullable|string|max:100',
+    $assistant = $this->getAssistant($request);
+
+    $statutValidation = 'nullable|in:EN_ATTENTE,CONFIRME,ANNULE,TERMINE,EXPIRE';
+
+    if ($assistant->type_assistant === 'SPECIALISE') {
+        $statutValidation .= ',ABSENT';
+    }
+
+    $data = $request->validate([
+        'statut' => $statutValidation,
+        'date_debut' => 'nullable|date',
+        'date_fin' => 'nullable|date|after_or_equal:date_debut',
+        'search' => 'nullable|string|max:100',
+    ]);
+
+    $query = $this->appointmentQuery($request)
+        ->with([
+            'patient.user:id,nom,prenom,email,telephone',
+            'medecin.user:id,nom,prenom',
+            'creneau',
+            'consultation',
         ]);
 
-        $query = $this->appointmentQuery($request)
-            ->with([
-                'patient.user:id,nom,prenom,email,telephone',
-                'medecin.user:id,nom,prenom',
-                'creneau',
-            ])
-            ->when($data['statut'] ?? null, fn ($q, $status) =>
-                $q->where('statut', $status)
-            )
-            ->when($data['date_debut'] ?? null, fn ($q, $date) =>
-                $q->whereHas('creneau', fn ($slot) =>
-                    $slot->whereDate('date_creneau', '>=', $date)
-                )
-            )
-            ->when($data['date_fin'] ?? null, fn ($q, $date) =>
-                $q->whereHas('creneau', fn ($slot) =>
-                    $slot->whereDate('date_creneau', '<=', $date)
-                )
-            )
-            ->when($data['search'] ?? null, function ($q, $search) {
-                $q->whereHas('patient.user', function ($user) use ($search) {
-                    $user->where('nom', 'like', "%{$search}%")
-                        ->orWhere('prenom', 'like', "%{$search}%")
-                        ->orWhere('email', 'like', "%{$search}%")
-                        ->orWhere('telephone', 'like', "%{$search}%");
-                });
-            })
-            ->orderByDesc('created_at');
+    if ($assistant->type_assistant !== 'SPECIALISE') {
+        $query->where('statut', '!=', 'ABSENT');
+    }
 
-        return response()->json($query->paginate(20));
+    $query
+        ->when($data['statut'] ?? null, fn ($q, $status) =>
+            $q->where('statut', $status)
+        )
+        ->when($data['date_debut'] ?? null, fn ($q, $date) =>
+            $q->whereHas('creneau', fn ($slot) =>
+                $slot->whereDate('date_creneau', '>=', $date)
+            )
+        )
+        ->when($data['date_fin'] ?? null, fn ($q, $date) =>
+            $q->whereHas('creneau', fn ($slot) =>
+                $slot->whereDate('date_creneau', '<=', $date)
+            )
+        )
+        ->when($data['search'] ?? null, function ($q, $search) {
+            $q->whereHas('patient.user', function ($user) use ($search) {
+                $user->where('nom', 'like', "%{$search}%")
+                    ->orWhere('prenom', 'like', "%{$search}%")
+                    ->orWhere('email', 'like', "%{$search}%")
+                    ->orWhere('telephone', 'like', "%{$search}%");
+            });
+        })
+        ->orderByDesc('created_at');
+
+    return response()->json($query->paginate(20));
     }
 
     public function storeRendezVous(Request $request)
@@ -502,6 +517,62 @@ class AssistantController extends Controller
             'message' => 'Rendez-vous annulé et créneau libéré.',
         ]);
     }
+
+
+
+
+    public function marquerAbsentRendezVous(Request $request, int $id)
+    {
+        $assistant = $this->getAssistant($request);
+
+        if ($assistant->type_assistant !== 'SPECIALISE') {
+            abort(403, 'Seule une assistante spécialisée peut marquer un rendez-vous absent.');
+        }
+
+        $rdv = DB::transaction(function () use ($request, $id) {
+            $rdv = $this->appointmentQuery($request)
+                ->with('creneau')
+                ->lockForUpdate()
+                ->findOrFail($id);
+
+            if ($rdv->statut !== 'CONFIRME') {
+                abort(409, 'Seul un rendez-vous confirmé peut être marqué absent.');
+            }
+
+            if ($rdv->consultation()->exists()) {
+                abort(409, 'Impossible de marquer absent un rendez-vous avec une consultation.');
+            }
+
+            $creneau = $rdv->creneau;
+
+            if (!$creneau) {
+                abort(409, 'Le créneau de ce rendez-vous est introuvable.');
+            }
+
+            $finRendezVous = Carbon::parse(
+                $creneau->date_creneau->toDateString() . ' ' . $creneau->heure_fin,
+                config('app.timezone')
+            );
+
+            if ($finRendezVous->greaterThanOrEqualTo(now(config('app.timezone')))) {
+                abort(409, 'Le rendez-vous n’est pas encore terminé.');
+            }
+
+            $rdv->update(['statut' => 'ABSENT']);
+
+            return $rdv->load([
+                'patient.user',
+                'medecin.user',
+                'creneau',
+            ]);
+        });
+
+        return response()->json([
+            'message' => 'Le rendez-vous a été marqué comme absent.',
+            'rendez_vous' => $rdv,
+        ]);
+    }
+
 
     public function reprogrammerRendezVous(Request $request, int $id)
     {

@@ -256,7 +256,7 @@ class PatientController extends Controller
         $patient = $this->getPatient($request);
 
         $data = $request->validate([
-            'statut' => 'nullable|in:EN_ATTENTE,CONFIRME,ANNULE,TERMINE',
+            'statut' => 'nullable|in:EN_ATTENTE,CONFIRME,ANNULE,TERMINE,EXPIRE',
         ]);
 
         $query = $patient->rendezVous()
@@ -265,6 +265,7 @@ class PatientController extends Controller
                 'creneau',
                 'consultation',
             ])
+            ->where('statut', '!=', 'ABSENT')
             ->when($data['statut'] ?? null, fn ($q, $statut) =>
                 $q->where('statut', $statut)
             )

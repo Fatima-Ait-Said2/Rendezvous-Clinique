@@ -72,6 +72,8 @@ function statusLabel(status) {
     CONFIRME: 'Confirmé',
     ANNULE: 'Annulé',
     TERMINE: 'Terminé',
+    EXPIRE: 'Expiré',
+    ABSENT: 'Absent',
   }
   return labels[status] || status || '—'
 }
@@ -82,9 +84,26 @@ function statusColor(status) {
     CONFIRME: '#23845b',
     ANNULE: '#c0392b',
     TERMINE: '#526579',
+    EXPIRE: '#526579',
+    ABSENT: '#805ad5',
+
   }
   return colors[status] || '#526579'
 }
+
+function appointmentHasEnded(rdv) {
+  const date = rdv.creneau?.date_creneau
+  const endTime = rdv.creneau?.heure_fin
+
+  if (!date || !endTime) return false
+
+  const end = new Date(
+    `${String(date).slice(0, 10)}T${String(endTime).slice(0, 8)}`
+  )
+
+  return !Number.isNaN(end.getTime()) && end.getTime() < Date.now()
+}
+
 
 function AssistantDashboard() {
   const [dashboard, setDashboard] = useState(null)
@@ -369,6 +388,29 @@ function AssistantDashboard() {
       )
 
       setSuccess(response.data?.message || 'Rendez-vous confirmé.')
+
+      await Promise.all([
+        loadRendezVous(),
+        refreshDashboard(),
+      ])
+    } catch (err) {
+      setError(getError(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+
+  const handleMarkAbsentAppointment = async (id) => {
+    if (!window.confirm('Marquer ce rendez-vous comme absent ?')) return
+
+    clearMessages()
+    setSaving(true)
+
+    try {
+      const response = await api.post(`/assistant/rendez-vous/${id}/absent`)
+
+      setSuccess(response.data?.message || 'Rendez-vous marqué comme absent.')
 
       await Promise.all([
         loadRendezVous(),
@@ -778,6 +820,10 @@ function AssistantDashboard() {
             <option value="CONFIRME">Confirmé</option>
             <option value="ANNULE">Annulé</option>
             <option value="TERMINE">Terminé</option>
+            <option value="EXPIRE">Expiré</option>
+            {isSpecialized && (
+              <option value="ABSENT">Absent</option>
+            )}
           </select>
 
           <button className="assistant-button" type="submit">Filtrer</button>
@@ -839,6 +885,22 @@ function AssistantDashboard() {
                           >
                             Annuler
                           </button>
+
+                          {isSpecialized &&
+                            rdv.statut === 'CONFIRME' &&
+                            !rdv.consultation &&
+                            appointmentHasEnded(rdv) && (
+                              <button
+                                type="button"
+                                className="assistant-button secondary small"
+                                onClick={() => handleMarkAbsentAppointment(rdv.id)}
+                                disabled={saving}
+                              >
+                                Absent
+                              </button>
+                          )}
+
+
                         </div>
                       )}
                     </td>

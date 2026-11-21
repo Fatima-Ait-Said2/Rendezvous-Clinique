@@ -200,6 +200,10 @@
   background: #e9effb;
   color: #506fa6;
 }
+.patient-status.expired {
+  background: #edf0f2;
+  color: #526579;
+}
 
 /* Formulaires */
 

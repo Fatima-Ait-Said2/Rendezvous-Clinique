@@ -11,3 +11,7 @@ Artisan::command('inspire', function () {
 Schedule::command('app:send-appointment-reminders')
     ->everyMinute()
     ->withoutOverlapping();
+
+Schedule::command('app:expire-pending-appointments')
+    ->everyMinute()
+    ->withoutOverlapping();    

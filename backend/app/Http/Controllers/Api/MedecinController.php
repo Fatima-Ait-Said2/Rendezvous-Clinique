@@ -415,7 +415,7 @@ class MedecinController extends Controller
         $medecin = $this->getMedecin($request);
 
         $data = $request->validate([
-            'statut' => 'nullable|in:EN_ATTENTE,CONFIRME,ANNULE,TERMINE',
+            'statut' => 'nullable|in:EN_ATTENTE,CONFIRME,ANNULE,TERMINE,EXPIRE,ABSENT',
             'date_debut' => 'nullable|date',
             'date_fin' => 'nullable|date|after_or_equal:date_debut',
             'search' => 'nullable|string|max:100',
@@ -533,6 +533,55 @@ class MedecinController extends Controller
             'message' => 'Rendez-vous annulé et créneau libéré.',
         ]);
     }
+
+
+
+    public function marquerAbsentRendezVous(Request $request, int $id)
+    {
+        $medecin = $this->getMedecin($request);
+
+        $rendezVous = DB::transaction(function () use ($medecin, $id) {
+            $rdv = $medecin->rendezVous()
+                ->with('creneau')
+                ->lockForUpdate()
+                ->findOrFail($id);
+
+            if ($rdv->statut !== 'CONFIRME') {
+                abort(409, 'Seul un rendez-vous confirmé peut être marqué absent.');
+            }
+
+            if ($rdv->consultation()->exists()) {
+                abort(409, 'Impossible de marquer absent un rendez-vous avec une consultation.');
+            }
+
+            $creneau = $rdv->creneau;
+
+            if (!$creneau) {
+                abort(409, 'Le créneau de ce rendez-vous est introuvable.');
+            }
+
+            $finRendezVous = Carbon::parse(
+                $creneau->date_creneau->toDateString() . ' ' . $creneau->heure_fin,
+                config('app.timezone')
+            );
+
+            if ($finRendezVous->greaterThanOrEqualTo(now(config('app.timezone')))) {
+                abort(409, 'Le rendez-vous n’est pas encore terminé.');
+            }
+
+            $rdv->update(['statut' => 'ABSENT']);
+
+            return $rdv->load(['patient', 'creneau']);
+        });
+
+        return response()->json([
+            'message' => 'Le rendez-vous a été marqué comme absent.',
+            'rendez_vous' => $rendezVous,
+        ]);
+    }
+
+
+
 
     public function creneauxDisponibles(Request $request)
     {

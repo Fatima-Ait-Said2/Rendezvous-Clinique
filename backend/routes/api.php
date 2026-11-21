@@ -70,6 +70,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/rendez-vous', [MedecinController::class, 'indexRendezVous']);
             Route::patch('/rendez-vous/{id}/confirmer', [MedecinController::class, 'confirmerRendezVous']);
             Route::patch('/rendez-vous/{id}/annuler', [MedecinController::class, 'annulerRendezVous']);
+            Route::patch('/rendez-vous/{id}/absent', [MedecinController::class, 'marquerAbsentRendezVous']);
             Route::post('/rendez-vous/{id}/reprogrammer', [MedecinController::class, 'reprogrammerRendezVous']);
 
             // Dossiers médicaux
@@ -117,6 +118,7 @@ Route::middleware('auth:sanctum')->group(function () {
                 Route::post('/rendez-vous', 'storeRendezVous');
                 Route::post('/rendez-vous/{id}/confirmer', 'confirmerRendezVous');
                 Route::post('/rendez-vous/{id}/annuler', 'annulerRendezVous');
+                Route::post('/rendez-vous/{id}/absent', 'marquerAbsentRendezVous');
                 Route::post('/rendez-vous/{id}/reprogrammer', 'reprogrammerRendezVous');
 
                 // Dossiers médicaux - assistant spécialisé uniquement

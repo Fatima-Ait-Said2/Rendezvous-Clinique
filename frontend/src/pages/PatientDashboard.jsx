@@ -17,6 +17,8 @@ const statusLabels = {
   CONFIRME: 'Confirmé',
   ANNULE: 'Annulé',
   TERMINE: 'Terminé',
+  EXPIRE: 'Expiré',
+  
 }
 
 const statusClasses = {
@@ -24,6 +26,7 @@ const statusClasses = {
   CONFIRME: 'confirmed',
   ANNULE: 'cancelled',
   TERMINE: 'completed',
+  EXPIRE: 'expired',
 }
 
 function getList(data) {
@@ -532,8 +535,8 @@ function PatientDashboard() {
                 <article className="patient-appointment" key={rdv.id}>
                   <div className="patient-appointment-main">
                     <div className="patient-appointment-date">
-                      <strong>{rdv.creneau?.date_creneau ? new Date(`${rdv.creneau.date_creneau}T00:00:00`).getDate() : '—'}</strong>
-                      <span>{rdv.creneau?.date_creneau ? new Date(`${rdv.creneau.date_creneau}T00:00:00`).toLocaleDateString('fr-FR', { month: 'short' }) : ''}</span>
+                      <strong>{rdv.creneau?.date_creneau ? new Date(String(rdv.creneau.date_creneau).slice(0, 10) + 'T00:00:00').getDate() : '—'}</strong>
+                      <span>{rdv.creneau?.date_creneau ? new Date(String(rdv.creneau.date_creneau).slice(0, 10) + 'T00:00:00').toLocaleDateString('fr-FR', { month: 'short' }) : ''}</span>
                     </div>
                     <div className="patient-appointment-info">
                       <strong>{doctorName(rdv.medecin)}</strong>

@@ -106,6 +106,20 @@ function timeLabel(value) {
   return value ? String(value).slice(0, 5) : '—'
 }
 
+
+function appointmentHasEnded(item) {
+  const date = item.creneau?.date_creneau
+  const endTime = item.creneau?.heure_fin
+
+  if (!date || !endTime) return false
+
+  const end = new Date(
+    `${String(date).slice(0, 10)}T${String(endTime).slice(0, 8)}`
+  )
+
+  return !Number.isNaN(end.getTime()) && end.getTime() < Date.now()
+}
+
 function errorMessage(err) {
   if (err.response?.data?.errors) {
     return Object.values(err.response.data.errors).flat().join(' ')
@@ -358,6 +372,19 @@ function MedecinContent({ section }) {
     }
   }
 
+
+  async function markAbsentRendezVous(id) {
+  if (!window.confirm('Marquer ce rendez-vous comme absent ?')) return
+
+  try {
+    await api.patch(`/medecin/rendez-vous/${id}/absent`)
+    setMessage('Rendez-vous marqué comme absent.')
+    await loadRendezVous()
+  } catch (err) {
+    setError(errorMessage(err))
+  }
+}
+
   async function prepareReprogramming(rendezVousId) {
     setError('')
     setMessage('')
@@ -577,7 +604,13 @@ function MedecinContent({ section }) {
                 <td>{dateLabel(item.creneau?.date_creneau || item.date_creneau)}</td>
                 <td>{timeLabel(item.creneau?.heure_debut)}</td>
                 <td>{item.motif || '—'}</td>
-                <td>{item.statut || '—'}</td>
+                <td>
+                  {item.statut === 'EXPIRE'
+                    ? 'Expiré'
+                    : item.statut === 'ABSENT'
+                      ? 'Absent'
+                      : item.statut || '—'}
+                </td>
                 <td>
                   {item.statut === 'EN_ATTENTE' && (
                     <button style={successButton} onClick={() => confirmRendezVous(item.id)}>
@@ -592,6 +625,15 @@ function MedecinContent({ section }) {
                       <button style={secondaryButton} onClick={() => prepareReprogramming(item.id)}>
                         Reprogrammer
                       </button>
+
+                      {item.statut === 'CONFIRME' &&
+                        !item.consultation &&
+                        appointmentHasEnded(item) && (
+                          <button
+                            style={secondaryButton}
+                            onClick={() => markAbsentRendezVous(item.id)} > Absent
+                          </button>
+                        )}
                     </>
                   )}
                 </td>
@@ -822,6 +864,8 @@ function MedecinContent({ section }) {
                 <option value="CONFIRME">Confirmé</option>
                 <option value="ANNULE">Annulé</option>
                 <option value="TERMINE">Terminé</option>
+                <option value="EXPIRE">Expiré</option>
+                <option value="ABSENT">Absent</option>
               </select>
             </div>
             <button style={buttonStyle} onClick={loadRendezVous}>Rechercher</button>
